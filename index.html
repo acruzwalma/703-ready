@@ -157,7 +157,7 @@ function workouts(){return [...Object.values(S.imported.workouts||{}),...Object.
 function typeOf(sport){const s=(sport||'').toLowerCase();
   if(/walk|golf|driv|gaming|sleep|^activity$|operations|meditat|manual/.test(s))return null;
   if(/triath/.test(s))return 'brick'; if(/run/.test(s))return 'run'; if(/swim/.test(s))return 'swim';
-  if(/cycl|spin|bike|assault|ride/.test(s))return 'bike'; if(/strength|weight|functional|powerlift|hiit|pilates|yoga/.test(s))return 'strength'; return 'other'}
+  if(/cycl|spin|bike|assault|ride/.test(s))return 'bike'; if(/strength|weight|functional|powerlift|hiit|pilates|yoga|mobility|stretch|core/.test(s))return 'strength'; return 'other'}
 
 // ── Rules v1 (written Oct 21 2026, before testing; re-test at Gate 1) ──
 function rulesFor(date){
@@ -282,11 +282,11 @@ function matchRaw(date){
   const left=[];cand.filter((c,j)=>!used.has(j)).sort((a,b)=>srcRank(a)-srcRank(b)).forEach(c=>{if(!left.some(k=>sameWk(k,c)))left.push(c)});
   return {items,left};
 }
-// Workouts done earlier in the week that matched nothing (e.g. a run on a rest day) count toward a later
+// Workouts done in the previous 3 days that matched nothing (e.g. a run on a rest day) count toward a later
 // session of the same type, within 3 days, so you are not told to repeat it. Done/Skip still override.
 function matchDay(date){
   let pool=[];
-  for(let d=mondayOf(date);d<=date;d=addDays(d,1)){
+  for(let d=addDays(date,-6);d<=date;d=addDays(d,1)){ // looks back across week boundaries (Sun lift → Mon strength)
     const {items,left}=matchRaw(d);
     items.forEach(x=>{ if(x.auto||x.manual) return;
       const k=pool.findIndex(c=>wantFor(x.s).includes(c.type)&&(c.min||0)>=15&&daysBetween(c.day,d)<=3);
