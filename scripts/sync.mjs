@@ -83,7 +83,7 @@ for (const w of workouts) {
   if (w.score_state !== "SCORED") continue;
   db.workouts[w.id] = { id: w.id, date: localDay(w.start, w.timezone_offset), start: w.start, sport: w.sport_name,
     min: +((Date.parse(w.end) - Date.parse(w.start)) / 60000).toFixed(1), avg_hr: w.score?.average_heart_rate ?? null,
-    max_hr: w.score?.max_heart_rate ?? null, strain: w.score?.strain ?? null };
+    max_hr: w.score?.max_heart_rate ?? null, strain: w.score?.strain ?? null, dist_m: w.score?.distance_meter ?? null };
 }
 if (E.INTERVALS_ATHLETE_ID && E.INTERVALS_API_KEY) {
   try {
@@ -93,8 +93,31 @@ if (E.INTERVALS_ATHLETE_ID && E.INTERVALS_API_KEY) {
     if (!r.ok) throw new Error("status " + r.status);
     db.intervals = (await r.json()).map(a => ({ id: a.id, date: (a.start_date_local || "").slice(0, 10), start: a.start_date || null, elapsed_min: a.elapsed_time ? +(a.elapsed_time / 60).toFixed(1) : null, type: a.type, name: a.name,
       min: a.moving_time ? +(a.moving_time / 60).toFixed(1) : null, avg_w: a.icu_average_watts ?? a.average_watts ?? null,
-      np: a.icu_weighted_avg_watts ?? null, avg_hr: a.average_heartrate ?? null, load: a.icu_training_load ?? null }));
+      np: a.icu_weighted_avg_watts ?? null, avg_hr: a.average_heartrate ?? null, load: a.icu_training_load ?? null,
+      dist_m: a.distance ?? null, speed: a.average_speed ?? null, decouple: a.decoupling ?? null }));
     console.log(`Intervals.icu: ${db.intervals.length} activities`);
+    // Second-by-second power, HR and speed (averaged to 5 s) so the app can check each session against its goal:
+    // interval reps, time in zone, pace. Kept for 28 days.
+    db.streams = db.streams || {};
+    const keep = new Date(Date.now() - 28 * 864e5).toISOString().slice(0, 10);
+    const ids = new Set(db.intervals.filter(a => a.date >= keep).map(a => String(a.id)));
+    for (const k of Object.keys(db.streams)) if (!ids.has(k)) delete db.streams[k];
+    const todo = db.intervals.filter(a => a.date >= keep && !db.streams[a.id] && (a.min || 0) >= 5).slice(0, 20);
+    let got = 0;
+    for (const a of todo) {
+      try {
+        const sr = await fetch(`https://intervals.icu/api/v1/activity/${encodeURIComponent(a.id)}/streams.json?types=watts,heartrate,velocity_smooth`,
+          { headers: { authorization: "Basic " + Buffer.from("API_KEY:" + E.INTERVALS_API_KEY).toString("base64"), "user-agent": "703ready/2.0", accept: "application/json" } });
+        if (!sr.ok) throw new Error("status " + sr.status);
+        const arr = await sr.json(); const by = {};
+        if (Array.isArray(arr)) { for (const x of arr) if (x && x.type && Array.isArray(x.data)) by[x.type] = x.data; }
+        else if (arr && typeof arr === 'object') for (const [k, v] of Object.entries(arr)) if (Array.isArray(v)) by[k] = v;
+        const ds = (d, dec) => { if (!d) return null; const o = []; for (let i = 0; i < d.length; i += 5) { let sum = 0, n = 0; for (let j = i; j < i + 5 && j < d.length; j++) if (d[j] != null) { sum += d[j]; n++; } o.push(n ? +(sum / n).toFixed(dec) : null); } return o; };
+        db.streams[a.id] = { dt: 5, w: ds(by.watts, 0), hr: ds(by.heartrate, 0), v: ds(by.velocity_smooth, 2) };
+        got++;
+      } catch (e) { console.log(`Stream for ${a.id} skipped: ${e.message}`); }
+    }
+    if (todo.length) console.log(`Intervals.icu: ${got} of ${todo.length} new activity streams saved`);
   } catch (e) { console.log("Intervals.icu skipped: " + e.message); }
 }
 if (E.GCAL_ICS_URL) {

@@ -82,8 +82,8 @@ details summary{cursor:pointer;color:var(--mut);font-size:12px;margin-top:6px}
 <input type="file" id="fit-file" accept=".fit,.FIT" multiple hidden>
 <input type="file" id="csv-file" accept=".csv" multiple hidden>
 <input type="file" id="json-file" accept=".json" hidden>
-<script src="plan.js?v=8"></script>
-<script src="fit.js?v=4"></script>
+<script src="plan.js?v=9"></script>
+<script src="fit.js?v=4"></script><script src="analyze.js?v=1"></script>
 <script>
 "use strict";
 const {BLOCKS,GATES,blockFor,sessionsFor:baseSessions,T,iso,addDays,daysBetween,D}=window.PLAN;
@@ -143,7 +143,7 @@ async function pull(){
     if(r.status===404){meta.remote=true;meta.whoop_connected=false;meta.err=null;render();return}
     if(!r.ok)throw new Error('GitHub returned '+r.status);
     const d=await openBox(await r.json(),key());
-    W={days:d.days||{},workouts:d.workouts||{},calls:Array.isArray(d.calls)?d.calls:null,calls_synced:d.calls_synced||null,cal:d.cal||null};weekCache={};IV=d.intervals||[];meta.synced_at=d.synced_at;meta.whoop_connected=true;meta.remote=true;meta.err=null}
+    W={streams:d.streams||{},days:d.days||{},workouts:d.workouts||{},calls:Array.isArray(d.calls)?d.calls:null,calls_synced:d.calls_synced||null,cal:d.cal||null};weekCache={};IV=d.intervals||[];meta.synced_at=d.synced_at;meta.whoop_connected=true;meta.remote=true;meta.err=null}
   catch(e){meta.err=e.name==='OperationError'?'Wrong passphrase: it has to match APP_PASSPHRASE in your GitHub secrets.':'Could not load Whoop data: '+e.message}
   render();
 }
@@ -196,8 +196,8 @@ function trimp(min,hr,st){const x=Math.max(0,Math.min(1,(hr-st.rhr)/(st.hrmaxRun
 // ── matching done work to the plan ──
 function doneFor(date){
   const c=[]; const ms=x=>{const t=x?Date.parse(x):NaN;return isNaN(t)?null:t};
-  workouts().filter(w=>w.date===date).forEach(w=>{const t=typeOf(w.sport);if(t)c.push({src:'Whoop',type:t,min:w.min,hr:w.avg_hr,label:w.sport,t0:ms(w.start)})});
-  IV.filter(a=>a.date===date).forEach(a=>{const t=typeOf(a.type);if(t)c.push({src:'Intervals',type:t,min:a.min,span:a.elapsed_min||a.min,hr:a.avg_hr,w:a.avg_w,np:a.np,label:a.name||a.type,t0:ms(a.start)})});
+  workouts().filter(w=>w.date===date).forEach(w=>{const t=typeOf(w.sport);if(t)c.push({src:'Whoop',type:t,min:w.min,hr:w.avg_hr,label:w.sport,t0:ms(w.start),dist_m:w.dist_m})});
+  IV.filter(a=>a.date===date).forEach(a=>{const t=typeOf(a.type);if(t)c.push({src:'Intervals',id:a.id,type:t,min:a.min,span:a.elapsed_min||a.min,hr:a.avg_hr,w:a.avg_w,np:a.np,label:a.name||a.type,t0:ms(a.start),dist_m:a.dist_m,decouple:a.decouple})});
   (S.fits[date]||[]).forEach(f=>c.push({src:'FIT',type:'bike',min:f.durMin,hr:f.avgHR,w:f.avgP,np:f.NP,label:'FIT upload',fit:f,t0:ms(f.start)}));
   return mergeSame(c);
 }
@@ -262,6 +262,16 @@ function weekPlan(mon){
 }
 function mondayOf(d){return addDays(d,-((D(d).getDay()+6)%7))}
 function sessionsFor(date){return weekPlan(mondayOf(date))[date].sessions}
+// Did the workout do what the session asked? (analyze.js; 5 s streams from Intervals.icu when available)
+function reviewHTML(s,c){
+  if(!window.ANALYZE) return '';
+  const id=c.id??(c.parts||[]).find(p=>p.id!=null)?.id; const stream=id!=null?(W.streams||{})[id]:null;
+  let a; try{a=ANALYZE.analyze(s,c,stream,S.settings)}catch(e){return ''}
+  if(!a||!a.bits.length) return '';
+  const col=a.bits.some(b=>b.startsWith('⚠'))?'var(--amber)':'var(--green,#4ade80)';
+  return `<div class="review" style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border-left:3px solid ${col}">
+    <div class="small" style="font-weight:700;color:${col}">${esc(a.head)}</div>${a.bits.map(b=>`<div class="tiny" style="margin-top:3px">${esc(b)}</div>`).join('')}</div>`;
+}
 function notesFor(date){const n=[...weekPlan(mondayOf(date))[date].notes];
   if(D(date).getDay()===3&&sessionsFor(date).some(s=>s.type!=='rest')) n.unshift('Wednesday is date night: do this session in the morning.');
   return n}
@@ -337,7 +347,7 @@ function vToday(){
     const status=manual?.status==='skip'?`<span class="skip">Skipped${manual.note?': '+esc(manual.note):''}</span>`:manual?.status==='done'?`<span class="done">Done${manual.rpe?' · RPE '+manual.rpe:''}${manual.note?' · '+esc(manual.note):''}</span>`:auto?`<span class="done">Done${early?' '+dayName(early)+' (already counted)':''} (${auto.src}): ${Math.round(auto.min)} min${auto.hr?' · '+Math.round(auto.hr)+' bpm':''}${auto.np?' · NP '+Math.round(auto.np)+' W':auto.w?' · '+Math.round(auto.w)+' W':''}</span>`:'<span class="faint">Not done yet</span>';
     html+=`<div class="sess ${s.type}"><div class="t">${esc(s.title)}${s.key?'<span class="tag key">KEY</span>':''}${s.test?'<span class="tag test">TEST</span>':''}${s.movedFrom?`<span class="tag capped">MOVED FROM ${dayName(s.movedFrom).toUpperCase()}</span>`:''}${s.swapped?'<span class="tag capped">SWAPPED</span>':''}${capped?`<span class="tag capped">${r.zone==='RED'?'REST TODAY':'CAP Z2'}</span>`:''}</div>
     <div class="d">${esc(s.detail)}</div>${capped?`<div class="d" style="color:var(--amber)">${r.zone==='RED'?'Red: rest, or 30 min Zone 1.':`Amber: same ${s.min} min, all of it at ${T(st).Z2()} or easy pace. Move this key session to tomorrow if you can.`}</div>`:''}
-    <div class="st">${status}</div>
+    <div class="st">${status}</div>${auto&&manual?.status!=='skip'?reviewHTML(s,auto):''}
     <div class="row wrap" style="margin-top:8px;gap:6px"><button class="btn sm ok" data-a="done" data-i="${i}">Done</button><button class="btn sm" data-a="skip" data-i="${i}">Skip</button><button class="btn sm" data-a="note" data-i="${i}">RPE / note</button>${manual?`<button class="btn sm" data-a="clear" data-i="${i}">Clear</button>`:''}</div></div>`;
   });
   const extra=matchRaw(d).left.filter(c=>!items.some(x=>x.auto&&x.auto.day===d&&sameWk(x.auto,c))); if(extra.length) html+=`<div class="card"><div class="kicker">Also recorded</div>${extra.map(c=>`<div class="small">${esc(c.label)} · ${Math.round(c.min||0)} min${c.hr?' · '+Math.round(c.hr)+' bpm':''} <span class="faint">(${c.src})</span></div>`).join('')}</div>`;
