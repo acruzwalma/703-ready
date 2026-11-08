@@ -83,7 +83,7 @@ details summary{cursor:pointer;color:var(--mut);font-size:12px;margin-top:6px}
 <input type="file" id="csv-file" accept=".csv" multiple hidden>
 <input type="file" id="json-file" accept=".json" hidden>
 <script src="plan.js?v=9"></script>
-<script src="fit.js?v=4"></script><script src="analyze.js?v=1"></script>
+<script src="fit.js?v=4"></script><script src="analyze.js?v=2"></script>
 <script>
 "use strict";
 const {BLOCKS,GATES,blockFor,sessionsFor:baseSessions,T,iso,addDays,daysBetween,D}=window.PLAN;
@@ -263,9 +263,16 @@ function weekPlan(mon){
 function mondayOf(d){return addDays(d,-((D(d).getDay()+6)%7))}
 function sessionsFor(date){return weekPlan(mondayOf(date))[date].sessions}
 // Did the workout do what the session asked? (analyze.js; 5 s streams from Intervals.icu when available)
+function streamOf(c){const id=c.id??(c.parts||[]).find(p=>p.id!=null)?.id;return id!=null?(W.streams||{})[id]||null:null}
+// When a day has several rides or runs, which one is "the" session: for a test, the one with the best
+// 20 minutes (the test effort, not the warm-up ride); otherwise the longest.
+function sessionScore(s,c){
+  if(s.test&&/^(ftp|dur)/.test(s.test)&&window.ANALYZE){const st=streamOf(c),w=st&&st.w;const b=w&&ANALYZE.bestWindows(w,Math.round(1200/(st.dt||5)),1)[0];if(b)return 1e6+b.v;if(c.np||c.w)return 1e5+(c.np||c.w);}
+  return c.min||0;
+}
 function reviewHTML(s,c){
   if(!window.ANALYZE) return '';
-  const id=c.id??(c.parts||[]).find(p=>p.id!=null)?.id; const stream=id!=null?(W.streams||{})[id]:null;
+  const stream=streamOf(c);
   let a; try{a=ANALYZE.analyze(s,c,stream,S.settings)}catch(e){return ''}
   if(!a||!a.bits.length) return '';
   const col=a.bits.some(b=>b.startsWith('⚠'))?'var(--amber)':'var(--green,#4ade80)';
@@ -286,10 +293,10 @@ function matchRaw(date){
   const items=plan.map((s,i)=>{
     const manual=(S.logs[date]||{})[i]; const want=wantFor(s);
     const hits=cand.filter((c,j)=>!used.has(j)&&want.includes(c.type));
-    let m=null; if(hits.length){hits.sort((a,b)=>srcRank(a)-srcRank(b));m=hits[0];cand.forEach((c,j)=>{if(sameWk(c,m))used.add(j)})}
+    let m=null; if(hits.length){const sc=c=>sessionScore(s,c);hits.sort((a,b)=>sc(b)-sc(a)||srcRank(a)-srcRank(b));m=hits[0];used.add(cand.indexOf(m))}
     return {s,i,auto:m,manual};
   });
-  const left=[];cand.filter((c,j)=>!used.has(j)).sort((a,b)=>srcRank(a)-srcRank(b)).forEach(c=>{if(!left.some(k=>sameWk(k,c)))left.push(c)});
+  const left=cand.filter((c,j)=>!used.has(j)); // recordings of one workout are already merged in doneFor
   return {items,left};
 }
 // Workouts done in the previous 3 days that matched nothing (e.g. a run on a rest day) count toward a later
@@ -350,7 +357,7 @@ function vToday(){
     <div class="st">${status}</div>${auto&&manual?.status!=='skip'?reviewHTML(s,auto):''}
     <div class="row wrap" style="margin-top:8px;gap:6px"><button class="btn sm ok" data-a="done" data-i="${i}">Done</button><button class="btn sm" data-a="skip" data-i="${i}">Skip</button><button class="btn sm" data-a="note" data-i="${i}">RPE / note</button>${manual?`<button class="btn sm" data-a="clear" data-i="${i}">Clear</button>`:''}</div></div>`;
   });
-  const extra=matchRaw(d).left.filter(c=>!items.some(x=>x.auto&&x.auto.day===d&&sameWk(x.auto,c))); if(extra.length) html+=`<div class="card"><div class="kicker">Also recorded</div>${extra.map(c=>`<div class="small">${esc(c.label)} · ${Math.round(c.min||0)} min${c.hr?' · '+Math.round(c.hr)+' bpm':''} <span class="faint">(${c.src})</span></div>`).join('')}</div>`;
+  const extra=matchRaw(d).left; if(extra.length) html+=`<div class="card"><div class="kicker">Also recorded</div>${extra.map(c=>`<div class="small">${esc(c.label)} · ${Math.round(c.min||0)} min${c.hr?' · '+Math.round(c.hr)+' bpm':''} <span class="faint">(${c.src})</span></div>`).join('')}</div>`;
   return html;
 }
 function vPlan(){

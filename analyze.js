@@ -40,13 +40,14 @@ function analyze(s,c,stream,st){
   const dt=stream?.dt||5, W=stream?.w?.some(v=>v>0)?stream.w:null, V=stream?.v?.some(v=>v>0)?stream.v:null, H=stream?.hr?.some(v=>v>0)?stream.hr:null;
 
   // duration
-  if(s.min&&c.min!=null&&s.type!=='brick'){ if(c.min<s.min*0.85) bad(`Short: ${Math.round(c.min)} of ${s.min} min`); }
+  if(s.min&&c.min!=null&&s.type!=='brick'&&!g.test){ if(c.min<s.min*0.85) bad(`Short: ${Math.round(c.min)} of ${s.min} min`); }
 
   if(s.type==='strength'){ out.head='Done'; return out; }
 
   // ── FTP / durability tests
   if(g.test&&/^ftp/.test(g.test)){
     const b=W?bestWindows(W,Math.round(1200/dt),1)[0]:null;
+    if(b&&b.v<st.ftp*0.75){out.head='No test effort found';info(`The best 20 min in this ride is only ${Math.round(b.v)} W, so this looks like the warm-up, not the test. If the test was its own recording, it is picked automatically once it syncs. Or upload its FIT under Tests.`);return out;}
     if(b){const f=Math.round(b.v*0.95);info(`Best 20 min: ${Math.round(b.v)} W → FTP ≈ ${f} W (now set to ${st.ftp} W)`);
       out.head=`FTP ≈ ${f} W`; if(f>=195) good('Clears the ≥ 195 W line that keeps 5:30 live'); else if(f<=175) bad('At or under 175 W: target moves to sub-5:45'); else info('Between 175 and 195 W: 5:30 stays a stretch');
       info('Upload the FIT under Tests (or set FTP in Setup) to update every target.');}
