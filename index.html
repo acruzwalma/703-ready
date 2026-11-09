@@ -83,7 +83,7 @@ details summary{cursor:pointer;color:var(--mut);font-size:12px;margin-top:6px}
 <input type="file" id="csv-file" accept=".csv" multiple hidden>
 <input type="file" id="json-file" accept=".json" hidden>
 <script src="plan.js?v=9"></script>
-<script src="fit.js?v=4"></script><script src="analyze.js?v=2"></script>
+<script src="fit.js?v=4"></script><script src="analyze.js?v=3"></script>
 <script>
 "use strict";
 const {BLOCKS,GATES,blockFor,sessionsFor:baseSessions,T,iso,addDays,daysBetween,D}=window.PLAN;
@@ -395,7 +395,7 @@ function vData(){
   const zc={GREEN:0,AMBER:0,RED:0,NONE:0};for(let i=0;i<60;i++)zc[rulesFor(addDays(end,-i)).zone]++;
   const L=loadSeries(); const last=L[L.length-1]; const tail=L.slice(-180);
   const b=blockFor(end); const target={recover:30,b1:33,b2:37,b3:42,g1:45,b4:45,hold:45,trip:38,b5:55,peak:58,taper:55}[b?.id]??null;
-  return `<div class="card"><h3>HRV, last 60 days <span class="tiny faint">band = 60-day mean ± 0.5 SD</span></h3>${svgLine(pts,{band:bandOk?band:null,color:'#a5b4fc',y0:20,y1:90})}
+  return `<div class="card"><button class="btn" data-a="summary" style="width:100%">📋 Copy 4-week summary for Claude</button>${msg&&/Summary/.test(msg)?`<div class="tiny" style="margin-top:6px;color:var(--green,#4ade80)">${esc(msg)}</div>`:''}</div><div class="card"><h3>HRV, last 60 days <span class="tiny faint">band = 60-day mean ± 0.5 SD</span></h3>${svgLine(pts,{band:bandOk?band:null,color:'#a5b4fc',y0:20,y1:90})}
   <div class="tiny muted">Zones in the last 60 days: ${zc.GREEN} green · ${zc.AMBER} amber · ${zc.RED} red · ${zc.NONE} no data. Rules v1 are re-tested at Gate 1 against ride quality.</div></div>
   <div class="card"><h3>Resting HR and sleep</h3>${svgLine(rhr,{h:130,y0:40,y1:65,color:'#f9a8d4'})}${svgLine(slp,{h:130,y0:3,y1:10,color:'#67e8f9'})}</div>
   <div class="card"><h3>Load: fitness (42-day) and fatigue (7-day)</h3>${tail.length?svgLine(tail.map(p=>({d:p.d,v:p.ctl})),{second:tail.map(p=>({d:p.d,v:p.atl})),ref:target,y0:0,y1:70}):'<div class="muted small">Needs Whoop workouts (connect Whoop or import the CSV export).</div>'}
@@ -432,6 +432,54 @@ function vSetup(){
   <div class="card"><h3>Import and backup</h3><div class="small muted" style="margin-bottom:8px">No server? Import Whoop's CSV export (physiological_cycles.csv and workouts.csv) to run the rules and the load chart offline.</div>
   <div class="row wrap" style="gap:6px"><button class="btn" data-a="csv">Import Whoop CSVs</button><button class="btn" data-a="export">Export backup</button><button class="btn" data-a="import">Restore backup</button><button class="btn" data-a="reset">Reset</button></div></div>`;
 }
+// ── plain-text summary to paste into a chat with Claude ──
+function summaryText(n=28){
+  const st=S.settings, end=iso(new Date()), start=addDays(end,-(n-1)), dd=days(), L=loadSeries(), at=d=>L.find(p=>p.d===d);
+  const f1=v=>v==null?'–':(+v).toFixed(1), r0=v=>v==null?'–':Math.round(v);
+  const b=blockFor(end), out=[];
+  out.push(`70.3 Ready summary, ${start} to ${end} (exported ${new Date().toLocaleString()})`);
+  out.push(`Race: IRONMAN 70.3 NC, Oct 16 2027, target 5:30. Block now: ${b?b.name+' ('+b.id+')':'–'}.`);
+  out.push(`Settings: FTP ${st.ftp} W (${st.ftpSource||'–'}), threshold pace ${ANALYZE.pace(1609.344/st.thrPace)}, CSS ${st.css} s/100m, LTHR ${st.lthr}, resting HR ${st.rhr}, max HR bike ${st.hrmaxBike} / run ${st.hrmaxRun}.`);
+  const now=at(end), then=at(addDays(end,-28));
+  if(now) out.push(`Load (hrTSS model): fitness ${f1(now.ctl)}, fatigue ${f1(now.atl)}, form ${f1(now.ctl-now.atl)}${then?`; 4 weeks ago fitness ${f1(then.ctl)}, fatigue ${f1(then.atl)}`:''}.`);
+  const wk=[];for(let m=mondayOf(start);m<=end;m=addDays(m,7)){let t=0;for(let i=0;i<7;i++){const p=at(addDays(m,i));if(p)t+=p.load}wk.push(`${m}: ${r0(t)}`)}
+  out.push('Weekly load: '+wk.join(' · '));
+  out.push('');
+  out.push('Recovery (date: zone · HRV ms [band] · resting HR · sleep h · Whoop recovery %):');
+  for(let d=start;d<=end;d=addDays(d,1)){const r=rulesFor(d),x=dd[d]||{};if(!x.hrv&&!x.rhr)continue;
+    out.push(`${d}: ${r.zone} · ${r0(x.hrv)} [${r0(r.vals.bandLo)}–${r0(r.vals.bandHi)}] · ${r0(x.rhr)} · ${f1(x.sleep_h)} · ${r0(x.recovery)}${r.zone!=='GREEN'&&r.zone!=='NONE'?' ('+r.why.join('; ')+')':''}`)}
+  out.push('');
+  out.push('Sessions (planned → what happened):');
+  for(let d=start;d<=end;d=addDays(d,1)){
+    const items=matchDay(d); const tags=[(callList().includes(d)?'call':''),(W.cal?.uda?.[d]?'UDA':''),(tripOn(d)?'trip':'')].filter(Boolean).join(', ');
+    const extra=matchRaw(d).left;
+    if(!items.length&&!extra.length) {out.push(`${d} ${dayName(d)}: rest${tags?' ['+tags+']':''}`);continue}
+    out.push(`${d} ${dayName(d)}${tags?' ['+tags+']':''}:`);
+    for(const {s,auto,manual,early} of items){
+      let line=`  - ${s.title} (${s.min||'–'} min): `;
+      if(manual?.status==='skip') line+=`SKIPPED${manual.note?' ('+manual.note+')':''}`;
+      else if(auto){line+=`done${early?' on '+dayName(early):''} [${auto.src}] ${r0(auto.min)} min, HR ${r0(auto.hr)}${auto.np?', NP '+r0(auto.np)+' W':''}`;
+        try{const a=ANALYZE.analyze(s,auto,streamOf(auto),st);if(a&&a.bits.length)line+=` → ${a.head}: ${a.bits.join(' | ')}`}catch(e){}}
+      else if(manual?.status==='done') line+='marked done (no recording)';
+      else line+=d<end?'MISSED':'not yet';
+      if(manual?.rpe) line+=`, RPE ${manual.rpe}`; if(manual?.note&&manual.status!=='skip') line+=`, note: ${manual.note}`;
+      out.push(line);
+    }
+    for(const c of extra) out.push(`  - extra: ${c.label} [${c.src}] ${r0(c.min)} min, HR ${r0(c.hr)}${c.np?', NP '+r0(c.np)+' W':''}`);
+  }
+  const preds=PREDS.filter(p=>S.actuals[p.id]!=null);
+  if(preds.length){out.push('');out.push('Predictions scored:');preds.forEach(p=>{const v=S.actuals[p.id];out.push(`  - ${p.m} (${p.date}): ${fmtPred(p.kind,v)} vs predicted ${fmtPred(p.kind,p.lo)}–${fmtPred(p.kind,p.hi)} → ${v>=p.lo&&v<=p.hi?'HIT':'MISS'}`)})}
+  const up=[];for(let i=1;i<=14;i++){const d=addDays(end,i);const t=[(callList().includes(d)?'call':''),(W.cal?.uda?.[d]?'UDA':''),(tripOn(d)?'trip':'')].filter(Boolean);if(t.length)up.push(`${d} ${t.join('+')}`)}
+  if(up.length){out.push('');out.push('Next 14 days on the calendar: '+up.join(' · '))}
+  return out.join('\n');
+}
+async function copySummary(){
+  const t=summaryText();
+  try{await navigator.clipboard.writeText(t);msg='Summary copied. Paste it into your chat with Claude.';render();return}catch(e){}
+  const o=document.createElement('div');o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99;padding:16px;display:flex;flex-direction:column;gap:10px';
+  o.innerHTML='<div class="small">Select all and copy:</div><textarea style="flex:1;width:100%;font-size:12px" readonly></textarea><button class="btn">Close</button>';
+  o.querySelector('textarea').value=t;o.querySelector('button').onclick=()=>o.remove();document.body.appendChild(o);o.querySelector('textarea').select();
+}
 function render(){
   const body=view==='today'?vToday():view==='plan'?vPlan():view==='data'?vData():view==='tests'?vTests():vSetup();
   const tabs=[['today','📋','Today'],['plan','🗓','Plan'],['data','📈','Recovery'],['tests','🎯','Tests'],['setup','⚙️','Setup']];
@@ -458,6 +506,7 @@ document.addEventListener('click',async e=>{
   else if(a==='savekey'){try{localStorage.setItem('703-key',document.getElementById('k').value.trim());localStorage.setItem('703-cid',document.getElementById('cid').value.trim())}catch(e){}msg='Saved';await pull();return}
   else if(a==='connect'){connectWhoop();return}
   else if(a==='pull'){await pull();return}
+  else if(a==='summary'){await copySummary();return}
   else if(a==='togtrip'){const L=S.settings.ignoreTrips=S.settings.ignoreTrips||[];const k=v;const ix=L.indexOf(k);if(ix>=0)L.splice(ix,1);else L.push(k);weekCache={};save()}
   else if(a==='savecalls'){S.settings.callDays=document.getElementById('calls').value.split(/[\s,]+/).filter(x=>/^\d{4}-\d\d-\d\d$/.test(x)).sort();save()}
   else if(a==='export'){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const l=document.createElement('a');l.href=URL.createObjectURL(b);l.download='703ready-v2-'+iso(new Date())+'.json';l.click();return}
