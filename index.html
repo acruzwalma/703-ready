@@ -394,12 +394,14 @@ function vData(){
   const bandOk=band.some(b=>b.lo!=null);
   const zc={GREEN:0,AMBER:0,RED:0,NONE:0};for(let i=0;i<60;i++)zc[rulesFor(addDays(end,-i)).zone]++;
   const L=loadSeries(); const last=L[L.length-1]; const tail=L.slice(-180);
-  const b=blockFor(end); const target={recover:30,b1:33,b2:37,b3:42,g1:45,b4:45,hold:45,trip:38,b5:55,peak:58,taper:55}[b?.id]??null;
+  const b=blockFor(end); // Block-end fitness if the plan is done as written, on this app's heart-rate scale (rescaled Nov 11 2026:
+  // HR scoring reads ~0.65 of power/pace-based load, calibrated on the week of Nov 2).
+  const target={recover:21,b1:24,b2:26,b3:27,g1:26,b4:28,hold:31,trip:24,b5:44,peak:46,taper:42}[b?.id]??null;
   return `<div class="card"><button class="btn" data-a="summary" style="width:100%">📋 Copy 4-week summary for Claude</button>${msg&&/Summary/.test(msg)?`<div class="tiny" style="margin-top:6px;color:var(--green,#4ade80)">${esc(msg)}</div>`:''}</div><div class="card"><h3>HRV, last 60 days <span class="tiny faint">band = 60-day mean ± 0.5 SD</span></h3>${svgLine(pts,{band:bandOk?band:null,color:'#a5b4fc',y0:20,y1:90})}
   <div class="tiny muted">Zones in the last 60 days: ${zc.GREEN} green · ${zc.AMBER} amber · ${zc.RED} red · ${zc.NONE} no data. Rules v1 are re-tested at Gate 1 against ride quality.</div></div>
   <div class="card"><h3>Resting HR and sleep</h3>${svgLine(rhr,{h:130,y0:40,y1:65,color:'#f9a8d4'})}${svgLine(slp,{h:130,y0:3,y1:10,color:'#67e8f9'})}</div>
   <div class="card"><h3>Load: fitness (42-day) and fatigue (7-day)</h3>${tail.length?svgLine(tail.map(p=>({d:p.d,v:p.ctl})),{second:tail.map(p=>({d:p.d,v:p.atl})),ref:target,y0:0,y1:70}):'<div class="muted small">Needs Whoop workouts (connect Whoop or import the CSV export).</div>'}
-  ${last?`<div class="grid3"><div class="stat"><div class="l">Fitness</div><div class="v">${last.ctl.toFixed(0)}</div><div class="s">block target ${target??'–'}</div></div><div class="stat"><div class="l">Fatigue</div><div class="v">${last.atl.toFixed(0)}</div><div class="s">7-day</div></div><div class="stat"><div class="l">Form</div><div class="v">${(last.ctl-last.atl).toFixed(0)}</div><div class="s">fitness − fatigue</div></div></div>`:''}
+  ${last?`<div class="grid3"><div class="stat"><div class="l">Fitness</div><div class="v">${last.ctl.toFixed(0)}</div><div class="s">end-of-block target ${target??'–'}</div></div><div class="stat"><div class="l">Fatigue</div><div class="v">${last.atl.toFixed(0)}</div><div class="s">7-day</div></div><div class="stat"><div class="l">Form</div><div class="v">${(last.ctl-last.atl).toFixed(0)}</div><div class="s">fitness − fatigue</div></div></div>`:''}
   <div class="tiny muted" style="margin-top:6px">Each workout scored by Banister TRIMP, 1 h at threshold HR (${S.settings.lthr}) = 100. Steady-state fitness ≈ weekly load ÷ 7. Call nights add no load: the 2026 data could not distinguish their effect from zero.</div></div>`;
 }
 function vTests(){
