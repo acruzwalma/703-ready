@@ -216,7 +216,7 @@ function mergeSame(c){
   c.sort((a,b)=>(b.src==='Whoop')-(a.src==='Whoop')||(b.min||0)-(a.min||0)); // longest Whoop first as the anchor
   for(const x of c){const g=groups.find(g=>g.some(p=>sameSession(p,x))); g?g.push(x):groups.push([x]);}
   return groups.map(g=>{
-    const best=[...g].sort((a,b)=>order.indexOf(a.src)-order.indexOf(b.src))[0], long=[...g].sort((a,b)=>(b.min||0)-(a.min||0))[0];
+    const pw=x=>x.np||x.w||0; const best=[...g].sort((a,b)=>order.indexOf(a.src)-order.indexOf(b.src)||pw(b)-pw(a)||(b.min||0)-(a.min||0))[0] /* two Garmin/Wahoo copies of one ride: use the one with real power (an Edge left recording while the Wahoo app ran the Kickr has ~0 W) */, long=[...g].sort((a,b)=>(b.min||0)-(a.min||0))[0];
     return {...best,min:long.min,hr:long.hr||best.hr,src:[...new Set(g.map(p=>p.src))].sort((a,b)=>order.indexOf(a)-order.indexOf(b)).join(' + '),parts:g};
   });
 }
