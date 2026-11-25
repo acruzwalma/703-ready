@@ -93,6 +93,13 @@ function analyze(s,c,stream,st){
     if(c.decouple!=null&&c.min>=60&&!wReps.length) (Math.abs(c.decouple)<=5?good:info)(`HR drift ${c.decouple.toFixed(1)}% (under 5% = aerobically solid)`);
   }
 
+  // ── run tests: report the result, never grade them as easy runs
+  if(g.test&&/^5k/.test(g.test)&&c.type==='run'){
+    out.head=c.min?`5K in ${mmss(c.min*60)}`:'5K recorded';
+    if(c.hr) info(`Avg HR ${Math.round(c.hr)}. An all-out 5K usually averages at or above threshold HR (~${st.lthr}).`);
+    info('Enter the time under Tests and set threshold pace in Setup.');
+    return out;
+  }
   // ── run
   if(s.type==='run'||(s.type==='brick'&&c.type==='run')){
     const pReps=g.reps.filter(r=>r.unit==='pace');
@@ -127,7 +134,7 @@ function analyze(s,c,stream,st){
   if(s.type==='swim') info('Swim logged.');
   const warns=out.bits.filter(b=>b.startsWith('⚠')).length;
   const goods=out.bits.filter(b=>b.startsWith('✓')).length;
-  out.head=out.head||(!warns?'On target':goods?'Partly on target':'Off target');
+  out.head=out.head||(!warns&&!goods?'Done (not checked)':!warns?'On target':goods?'Partly on target':'Off target');
   if(!out.bits.length) out.head='Done';
   return out;
 }
