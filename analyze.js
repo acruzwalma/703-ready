@@ -34,7 +34,11 @@ function bestWindows(a,len,n){
 function np(w,dt){const k=Math.max(1,Math.round(30/dt));const r=[];let s=0;for(let i=0;i<w.length;i++){s+=w[i]||0;if(i>=k)s-=w[i-k]||0;if(i>=k-1)r.push(s/k)}
   return r.length?Math.pow(r.reduce((a,v)=>a+v**4,0)/r.length,0.25):null}
 
-function analyze(s,c,stream,st){
+// Heart rate over the last third of each rep (HR lags, so the end of the rep is what counts), and what
+// that intensity usually costs: ~93% of LTHR at threshold, ~87% at sweet spot / tempo.
+function repHR(H,ws,len){const v=[];for(const w of ws){const a=w.i+Math.floor(len*2/3),b=w.i+len;for(let i=a;i<b&&i<H.length;i++)if(H[i]>0)v.push(H[i])}return v.length?v.reduce((x,y)=>x+y,0)/v.length:null}
+function expectedHR(intensity,lthr){return intensity>=0.95?0.93*lthr:intensity>=0.85?0.87*lthr:null}
+function analyze(s,c,stream,st,ctx){
   if(!s||!c) return null;
   const g=goalOf(s,st), out={ok:true,bits:[],head:''}; const bad=t=>{out.ok=false;out.bits.push('⚠ '+t)}, good=t=>out.bits.push('✓ '+t), info=t=>out.bits.push(t);
   const dt=stream?.dt||5, W=stream?.w?.some(v=>v>0)?stream.w:null, V=stream?.v?.some(v=>v>0)?stream.v:null, H=stream?.hr?.some(v=>v>0)?stream.hr:null;
@@ -70,7 +74,9 @@ function analyze(s,c,stream,st){
         const vals=ws.map(w=>Math.round(w.v)), inR=vals.filter(v=>v>=r.lo*0.97&&v<=r.hi*1.03).length, hot=vals.filter(v=>v>r.hi*1.03).length, under=vals.filter(v=>v<r.lo*0.97).length;
         const lbl=`${r.n} × ${r.sec>=60?r.sec/60+' min':r.sec+' s'}`;
         if(vals.length<r.n) bad(`${lbl}: only ${vals.length} found`);
-        else if(inR===r.n) good(`${lbl}: ${vals.join(', ')} W (goal ${r.lo}–${r.hi})`);
+        else if(inR===r.n){ good(`${lbl}: ${vals.join(', ')} W (goal ${r.lo}–${r.hi})`);
+          const ex=expectedHR(((r.lo+r.hi)/2)/st.ftp,st.lthr), hr=H?repHR(H,ws,len):null;
+          if(ex&&hr&&hr<ex-3){out.push={kind:'bike'};out.bits.push(`↑ Room to push: HR only ${Math.round(hr)} at the end of the reps (this effort usually brings you to ~${Math.round(ex)}). Next time ride the top of the range, ${r.hi} W.`);} }
         else if(under) bad(`${lbl}: ${vals.join(', ')} W, ${under} under ${r.lo} W`);
         else bad(`${lbl}: ${vals.join(', ')} W, ${hot} over ${r.hi} W (harder than asked)`);
       }
@@ -110,9 +116,10 @@ function analyze(s,c,stream,st){
         const lbl=`${r.n} × ${r.sec>=60?r.sec/60+' min':r.sec+' s'}`, shown=ps.map(p=>mmss(p)).join(', ');
         const slow=ps.filter(p=>p>r.lo).length, fast=ps.filter(p=>p<r.hi).length;
         if(ws.length<r.n) bad(`${lbl}: only ${ws.length} found`);
-        else if(!slow&&!fast) good(`${lbl}: ${shown}/mi (goal ${mmss((r.lo+r.hi)/2)})`);
+        else if(!slow){ if(!fast) good(`${lbl}: ${shown}/mi (goal ${mmss((r.lo+r.hi)/2)})`); else bad(`${lbl}: ${shown}/mi, ${fast} faster than ${mmss(r.hi)} (save it for race day)`);
+          const tgt=(r.lo+r.hi)/2, ex=expectedHR(st.thrPace/tgt,st.lthr), hr=H?repHR(H,ws,len):null;
+          if(ex&&hr&&hr<ex-3){out.push={kind:'run'};out.bits.push(`↑ Room to push: HR only ${Math.round(hr)} at the end of the reps (threshold running usually brings you to ~${Math.round(ex)}). Next time run the reps at ~${mmss(tgt-5)}/mi.`);} }
         else if(slow) bad(`${lbl}: ${shown}/mi, ${slow} slower than ${mmss(r.lo)}`);
-        else bad(`${lbl}: ${shown}/mi, ${fast} faster than ${mmss(r.hi)} (save it for race day)`);
       }
       if(!pReps.length&&g.easy){
         const avgV=moving.reduce((a,v)=>a+v,0)/moving.length, p=1609.344/avgV;
@@ -133,8 +140,9 @@ function analyze(s,c,stream,st){
 
   if(s.type==='swim') info('Swim logged.');
   const warns=out.bits.filter(b=>b.startsWith('⚠')).length;
+  if(!out.push&&s.key&&!g.test&&ctx&&ctx.rpe&&+ctx.rpe<=5&&!out.bits.some(b=>b.startsWith('⚠'))&&g.reps.length){out.push={kind:s.type};out.bits.push(`↑ You rated it ${ctx.rpe}/10. Key sessions should feel about 7/10: push the top of the target next time.`);}
   const goods=out.bits.filter(b=>b.startsWith('✓')).length;
-  out.head=out.head||(!warns&&!goods?'Done (not checked)':!warns?'On target':goods?'Partly on target':'Off target');
+  out.head=out.head||(!warns&&!goods?'Done (not checked)':!warns?(out.push?'On target · room to push':'On target'):goods?'Partly on target':'Off target');
   if(!out.bits.length) out.head='Done';
   return out;
 }

@@ -83,7 +83,7 @@ details summary{cursor:pointer;color:var(--mut);font-size:12px;margin-top:6px}
 <input type="file" id="csv-file" accept=".csv" multiple hidden>
 <input type="file" id="json-file" accept=".json" hidden>
 <script src="plan.js?v=9"></script>
-<script src="fit.js?v=4"></script><script src="analyze.js?v=4"></script>
+<script src="fit.js?v=4"></script><script src="analyze.js?v=5"></script>
 <script>
 "use strict";
 const {BLOCKS,GATES,blockFor,sessionsFor:baseSessions,T,iso,addDays,daysBetween,D}=window.PLAN;
@@ -270,12 +270,29 @@ function sessionScore(s,c){
   if(s.test&&/^(ftp|dur)/.test(s.test)&&window.ANALYZE){const st=streamOf(c),w=st&&st.w;const b=w&&ANALYZE.bestWindows(w,Math.round(1200/(st.dt||5)),1)[0];if(b)return 1e6+b.v;if(c.np||c.w)return 1e5+(c.np||c.w);}
   return c.min||0;
 }
+// Three key sessions in a row of the same sport with room to push → time to raise the number itself.
+function pushTrend(date,kind){
+  const hits=[];
+  for(let d=date,k=0;k<35&&hits.length<3;d=addDays(d,-1),k++){
+    for(const {s,auto,manual} of matchDay(d)){
+      if(!auto||!s.key||s.test||s.type!==kind||!ANALYZE.goalOf(s,S.settings).reps.length) continue;
+      let a=null;try{a=ANALYZE.analyze(s,auto,streamOf(auto),S.settings,manual||null)}catch(e){}
+      if(a&&a.bits.some(b=>b.startsWith('✓')||b.startsWith('⚠'))) hits.push(!!a.push);
+    }
+  }
+  if(hits.length<3||!hits.every(Boolean)) return '';
+  const st=S.settings;
+  return kind==='bike'
+    ? `↑↑ 3 key rides in a row with room to push: raise FTP to ~${Math.round(st.ftp*1.03)} W in Setup (or retest early).`
+    : `↑↑ 3 quality runs in a row with room to push: set threshold pace to ~${ANALYZE.pace(1609.344/(st.thrPace-5)).replace('/mi','')}/mi in Setup.`;
+}
 function reviewHTML(s,c){
   if(!window.ANALYZE) return '';
   const stream=streamOf(c);
-  let a; try{a=ANALYZE.analyze(s,c,stream,S.settings)}catch(e){return ''}
+  let a; try{a=ANALYZE.analyze(s,c,stream,S.settings,arguments[2]||null)}catch(e){return ''}
+  if(a&&a.push&&arguments[3]){const t=pushTrend(arguments[3],a.push.kind);if(t)a.bits.push(t)}
   if(!a||!a.bits.length) return '';
-  const col=a.bits.some(b=>b.startsWith('⚠'))?'var(--amber)':'var(--green,#4ade80)';
+  const col=a.bits.some(b=>b.startsWith('⚠'))?'var(--amber)':a.push?'#60a5fa':'var(--green,#4ade80)';
   return `<div class="review" style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.04);border-left:3px solid ${col}">
     <div class="small" style="font-weight:700;color:${col}">${esc(a.head)}</div>${a.bits.map(b=>`<div class="tiny" style="margin-top:3px">${esc(b)}</div>`).join('')}</div>`;
 }
@@ -354,7 +371,7 @@ function vToday(){
     const status=manual?.status==='skip'?`<span class="skip">Skipped${manual.note?': '+esc(manual.note):''}</span>`:manual?.status==='done'?`<span class="done">Done${manual.rpe?' · RPE '+manual.rpe:''}${manual.note?' · '+esc(manual.note):''}</span>`:auto?`<span class="done">Done${early?' '+dayName(early)+' (already counted)':''} (${auto.src}): ${Math.round(auto.min)} min${auto.hr?' · '+Math.round(auto.hr)+' bpm':''}${auto.np?' · NP '+Math.round(auto.np)+' W':auto.w?' · '+Math.round(auto.w)+' W':''}</span>`:'<span class="faint">Not done yet</span>';
     html+=`<div class="sess ${s.type}"><div class="t">${esc(s.title)}${s.key?'<span class="tag key">KEY</span>':''}${s.test?'<span class="tag test">TEST</span>':''}${s.movedFrom?`<span class="tag capped">MOVED FROM ${dayName(s.movedFrom).toUpperCase()}</span>`:''}${s.swapped?'<span class="tag capped">SWAPPED</span>':''}${capped?`<span class="tag capped">${r.zone==='RED'?'REST TODAY':'CAP Z2'}</span>`:''}</div>
     <div class="d">${esc(s.detail)}</div>${capped?`<div class="d" style="color:var(--amber)">${r.zone==='RED'?'Red: rest, or 30 min Zone 1.':`Amber: same ${s.min} min, all of it at ${T(st).Z2()} or easy pace. Move this key session to tomorrow if you can.`}</div>`:''}
-    <div class="st">${status}</div>${auto&&manual?.status!=='skip'?reviewHTML(s,auto):''}
+    <div class="st">${status}</div>${auto&&manual?.status!=='skip'?reviewHTML(s,auto,manual,d):''}
     <div class="row wrap" style="margin-top:8px;gap:6px"><button class="btn sm ok" data-a="done" data-i="${i}">Done</button><button class="btn sm" data-a="skip" data-i="${i}">Skip</button><button class="btn sm" data-a="note" data-i="${i}">RPE / note</button>${manual?`<button class="btn sm" data-a="clear" data-i="${i}">Clear</button>`:''}</div></div>`;
   });
   const extra=matchRaw(d).left; if(extra.length) html+=`<div class="card"><div class="kicker">Also recorded</div>${extra.map(c=>`<div class="small">${esc(c.label)} · ${Math.round(c.min||0)} min${c.hr?' · '+Math.round(c.hr)+' bpm':''} <span class="faint">(${c.src})</span></div>`).join('')}</div>`;
