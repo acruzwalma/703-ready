@@ -286,6 +286,45 @@ function pushTrend(date,kind){
     ? `↑↑ 3 key rides in a row with room to push: raise FTP to ~${Math.round(st.ftp*1.03)} W in Setup (or retest early).`
     : `↑↑ 3 quality runs in a row with room to push: set threshold pace to ~${ANALYZE.pace(1609.344/(st.thrPace-5)).replace('/mi','')}/mi in Setup.`;
 }
+// Before the session: is this a day to hold back or one where pushing is allowed, and how far.
+function lastPushOf(date,kind){
+  for(let d=addDays(date,-1),k=0;k<21;d=addDays(d,-1),k++)
+    for(const {s,auto,manual} of matchDay(d)){
+      if(!auto||!s.key||s.test||s.type!==kind||!ANALYZE.goalOf(s,S.settings).reps.length) continue;
+      let a=null;try{a=ANALYZE.analyze(s,auto,streamOf(auto),S.settings,manual||null)}catch(e){}
+      if(a&&a.bits.some(b=>b.startsWith('✓')||b.startsWith('⚠'))) return {push:!!a.push,warn:a.bits.some(b=>b.startsWith('⚠')),date:d};
+    }
+  return null;
+}
+function effortGuide(s,d){
+  if(!window.ANALYZE||s.type==='rest'||s.type==='strength'||s.type==='swim') return null;
+  const st=S.settings, g=ANALYZE.goalOf(s,st), mm=x=>ANALYZE.pace(1609.344/x).replace('/mi','');
+  const zone=d<=iso(new Date())?rulesFor(d).zone:'NONE';
+  if(s.test) return {kind:'test',text:'Test: maximal, but paced evenly. Start controlled, finish with nothing left.'};
+  const reps=g.reps.filter(r=>(s.type==='run'||s.type==='brick')?r.unit==='pace':r.unit==='w');
+  if(!reps.length||!s.key){
+    if(s.type==='run'&&g.easy) return {kind:'hold',text:`Hold: easy is the point. ${mm(g.easy.fast)}–${mm(g.easy.slow)}/mi or slower, HR under ~${Math.round(st.lthr*0.89)}. Don't push.${g.strides?' Strides at the end: fast but relaxed.':''}`};
+    if(g.steady) return {kind:'hold',text:`Hold: ${g.steady.lo}–${g.steady.hi} W, never above ${g.steady.hi}. Don't push.`};
+    return {kind:'hold',text:'Hold: easy effort. Don\'t push.'};
+  }
+  if(zone==='RED') return {kind:'hold',text:'Red day: follow the red-day rule above, no pushing.'};
+  if(zone==='AMBER') return {kind:'hold',text:'Amber day: hold at the bottom of the target. No pushing today.'};
+  const last=lastPushOf(d,s.type==='brick'?'bike':s.type), r=reps[0];
+  const lastTxt=last?(last.push?` Your last one had room to push, so start rep 1 at the push target.`:last.warn?` Your last one missed the target, so start at the target and push only if rep 1 feels easy.`:''):'';
+  if(r.unit==='pace'){
+    const t=(r.lo+r.hi)/2, push=t-5, cap=t-10, hr=Math.round(st.lthr*(st.thrPace/t>=0.95?0.93:0.87));
+    return {kind:'push',text:`Push allowed. Target ${mm(t)}/mi. If rep 1 feels 6/10 or easier and HR stays under ~${hr}, run the rest at ${mm(push)}/mi. Ceiling ${mm(cap)}/mi: faster than that is racing, not training.${lastTxt}`};
+  }
+  if(((r.lo+r.hi)/2)/st.ftp<0.85) return {kind:'hold',text:`Hold at race power: ${r.lo}–${r.hi} W exactly. These reps practice race-day pacing, so don't push above ${r.hi} W even if it feels easy; holding steady is the skill.${g.steady?` Between reps: ${g.steady.lo}–${g.steady.hi} W.`:''}`};
+  const push=r.hi, cap=Math.round(r.hi*1.03), hr=Math.round(st.lthr*(((r.lo+r.hi)/2)/st.ftp>=0.95?0.93:0.87));
+  return {kind:'push',text:`Push allowed. Target ${r.lo}–${r.hi} W. If rep 1 feels 6/10 or easier and HR stays under ~${hr}, ride the rest at ${push} W. Ceiling ${cap} W.${g.steady?` Between reps: hold ${g.steady.lo}–${g.steady.hi} W.`:''}${lastTxt}`};
+}
+function effortHTML(s,d){
+  let e=null;try{e=effortGuide(s,d)}catch(x){}
+  if(!e) return '';
+  const col=e.kind==='push'?'#60a5fa':e.kind==='test'?'var(--amber)':'var(--muted,#94a3b8)', ic=e.kind==='push'?'▲':e.kind==='test'?'◆':'■';
+  return `<div class="tiny" style="margin-top:6px;padding:7px 10px;border-radius:10px;background:rgba(255,255,255,.04);border-left:3px solid ${col}"><b style="color:${col}">${ic}</b> ${esc(e.text)}</div>`;
+}
 function reviewHTML(s,c){
   if(!window.ANALYZE) return '';
   const stream=streamOf(c);
@@ -371,7 +410,7 @@ function vToday(){
     const status=manual?.status==='skip'?`<span class="skip">Skipped${manual.note?': '+esc(manual.note):''}</span>`:manual?.status==='done'?`<span class="done">Done${manual.rpe?' · RPE '+manual.rpe:''}${manual.note?' · '+esc(manual.note):''}</span>`:auto?`<span class="done">Done${early?' '+dayName(early)+' (already counted)':''} (${auto.src}): ${Math.round(auto.min)} min${auto.hr?' · '+Math.round(auto.hr)+' bpm':''}${auto.np?' · NP '+Math.round(auto.np)+' W':auto.w?' · '+Math.round(auto.w)+' W':''}</span>`:'<span class="faint">Not done yet</span>';
     html+=`<div class="sess ${s.type}"><div class="t">${esc(s.title)}${s.key?'<span class="tag key">KEY</span>':''}${s.test?'<span class="tag test">TEST</span>':''}${s.movedFrom?`<span class="tag capped">MOVED FROM ${dayName(s.movedFrom).toUpperCase()}</span>`:''}${s.swapped?'<span class="tag capped">SWAPPED</span>':''}${capped?`<span class="tag capped">${r.zone==='RED'?'REST TODAY':'CAP Z2'}</span>`:''}</div>
     <div class="d">${esc(s.detail)}</div>${capped?`<div class="d" style="color:var(--amber)">${r.zone==='RED'?'Red: rest, or 30 min Zone 1.':`Amber: same ${s.min} min, all of it at ${T(st).Z2()} or easy pace. Move this key session to tomorrow if you can.`}</div>`:''}
-    <div class="st">${status}</div>${auto&&manual?.status!=='skip'?reviewHTML(s,auto,manual,d):''}
+    <div class="st">${status}</div>${!auto&&!manual?effortHTML(s,d):''}${auto&&manual?.status!=='skip'?reviewHTML(s,auto,manual,d):''}
     <div class="row wrap" style="margin-top:8px;gap:6px"><button class="btn sm ok" data-a="done" data-i="${i}">Done</button><button class="btn sm" data-a="skip" data-i="${i}">Skip</button><button class="btn sm" data-a="note" data-i="${i}">RPE / note</button>${manual?`<button class="btn sm" data-a="clear" data-i="${i}">Clear</button>`:''}</div></div>`;
   });
   const extra=matchRaw(d).left; if(extra.length) html+=`<div class="card"><div class="kicker">Also recorded</div>${extra.map(c=>`<div class="small">${esc(c.label)} · ${Math.round(c.min||0)} min${c.hr?' · '+Math.round(c.hr)+' bpm':''} <span class="faint">(${c.src})</span></div>`).join('')}</div>`;
